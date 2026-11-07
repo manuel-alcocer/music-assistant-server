@@ -85,6 +85,7 @@ from music_assistant_models.player import DeviceInfo
 from PIL import Image
 
 from music_assistant.constants import (
+    CONF_DSD_DOP,
     CONF_ENTRY_FLOW_MODE_SAMPLE_RATE,
     HIDDEN_ANNOUNCE_VOLUME_CONFIG_ENTRIES,
 )
@@ -1992,6 +1993,17 @@ class SendspinPlayer(SendspinBasePlayer):
                 sample_rate_entry.depends_on = CONF_PREFERRED_SENDSPIN_FORMAT
                 sample_rate_entry.depends_on_value = SENDSPIN_FORMAT_AUTOMATIC
                 entries.append(sample_rate_entry)
+                entries.append(
+                    ConfigEntry(
+                        key=CONF_DSD_DOP,
+                        type=ConfigEntryType.BOOLEAN,
+                        category="protocol_generic",
+                        default_value=False,
+                        depends_on=CONF_PREFERRED_SENDSPIN_FORMAT,
+                        depends_on_value=SENDSPIN_FORMAT_AUTOMATIC,
+                        advanced=True,
+                    )
+                )
 
         if player_role is not None and not _OUTPUT_DELAY_COMMANDS.isdisjoint(
             player_role.state_supported_commands

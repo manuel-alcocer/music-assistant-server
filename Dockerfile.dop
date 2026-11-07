@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1
+# Music Assistant 2.10.9 + DSD over PCM (DoP) for Sendspin players.
+# Overlays only the patched (pure Python) modules on the official image, so the
+# result is valid for every architecture the upstream image is built for.
+ARG BASE_IMAGE=ghcr.io/music-assistant/server:2.10.9
+FROM ${BASE_IMAGE}
+
+ARG MA_PKG=/app/venv/lib/python3.14/site-packages/music_assistant
+COPY music_assistant/constants.py ${MA_PKG}/constants.py
+COPY music_assistant/helpers/dop.py ${MA_PKG}/helpers/dop.py
+COPY music_assistant/controllers/streams/audio.py ${MA_PKG}/controllers/streams/audio.py
+COPY music_assistant/providers/sendspin/player.py ${MA_PKG}/providers/sendspin/player.py
+COPY music_assistant/providers/sendspin/strings.json ${MA_PKG}/providers/sendspin/strings.json
+COPY music_assistant/translations/en.json ${MA_PKG}/translations/en.json
+
+RUN /app/venv/bin/python -m compileall -q \
+        ${MA_PKG}/constants.py ${MA_PKG}/helpers/dop.py \
+        ${MA_PKG}/controllers/streams/audio.py ${MA_PKG}/providers/sendspin/player.py \
+    && /app/venv/bin/python -c "import music_assistant.helpers.dop, music_assistant.controllers.streams.audio, music_assistant.providers.sendspin.player"
+
+LABEL org.opencontainers.image.source="https://github.com/manuel-alcocer/music-assistant-server" \
+      org.opencontainers.image.description="Music Assistant 2.10.9 with DSD over PCM (DoP) for Sendspin players"
