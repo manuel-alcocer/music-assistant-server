@@ -8,6 +8,7 @@ FROM ${BASE_IMAGE}
 ARG MA_PKG=/app/venv/lib/python3.14/site-packages/music_assistant
 COPY music_assistant/constants.py ${MA_PKG}/constants.py
 COPY music_assistant/helpers/dop.py ${MA_PKG}/helpers/dop.py
+COPY music_assistant/models/player.py ${MA_PKG}/models/player.py
 COPY music_assistant/controllers/streams/audio.py ${MA_PKG}/controllers/streams/audio.py
 COPY music_assistant/controllers/player_queues/queue_loader.py ${MA_PKG}/controllers/player_queues/queue_loader.py
 COPY music_assistant/controllers/player_queues/stream_feeder.py ${MA_PKG}/controllers/player_queues/stream_feeder.py
@@ -16,11 +17,11 @@ COPY music_assistant/providers/sendspin/strings.json ${MA_PKG}/providers/sendspi
 COPY music_assistant/translations/en.json ${MA_PKG}/translations/en.json
 
 RUN /app/venv/bin/python -m compileall -q \
-        ${MA_PKG}/constants.py ${MA_PKG}/helpers/dop.py \
+        ${MA_PKG}/constants.py ${MA_PKG}/helpers/dop.py ${MA_PKG}/models/player.py \
         ${MA_PKG}/controllers/streams/audio.py ${MA_PKG}/providers/sendspin/player.py \
         ${MA_PKG}/controllers/player_queues/queue_loader.py \
         ${MA_PKG}/controllers/player_queues/stream_feeder.py \
-    && /app/venv/bin/python -c "import music_assistant.helpers.dop, music_assistant.controllers.streams.audio, music_assistant.controllers.player_queues.queue_loader, music_assistant.controllers.player_queues.stream_feeder, music_assistant.providers.sendspin.player"
+    && /app/venv/bin/python -c "import music_assistant.helpers.dop, music_assistant.models.player, music_assistant.controllers.streams.audio, music_assistant.controllers.player_queues.queue_loader, music_assistant.controllers.player_queues.stream_feeder, music_assistant.providers.sendspin.player"
 
 LABEL org.opencontainers.image.source="https://github.com/manuel-alcocer/music-assistant-server" \
       org.opencontainers.image.description="Music Assistant 2.10.9 with DSD over PCM (DoP) for Sendspin players"

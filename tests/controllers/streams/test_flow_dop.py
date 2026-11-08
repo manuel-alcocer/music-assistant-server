@@ -12,6 +12,7 @@ from music_assistant_models.media_items import AudioFormat
 from music_assistant.constants import (
     CONF_DSD_DOP,
     CONF_FLOW_MODE_SAMPLE_RATE,
+    CONF_OUTPUT_CHANNELS,
     FLOW_MODE_SAMPLE_RATE_SMART,
 )
 from music_assistant.controllers.streams.audio import StreamsAudio
@@ -116,6 +117,57 @@ async def test_flow_format_ignores_dop_for_groups() -> None:
     assert fmt.sample_rate == 352800
 
 
+@pytest.mark.asyncio
+async def test_flow_format_ignores_dop_for_a_16_bit_output() -> None:
+    """A client that takes the DoP rate only at 16 bits would truncate the DSD payload."""
+    audio = _make_streams_audio(dop=True)
+    player = _make_player()
+    player.supports_dop_output = MagicMock(return_value=False)
+    fmt = await audio.select_flow_pcm_format(player, start_streamdetails=_dsd_streamdetails())
+    assert fmt.sample_rate == 352800
+    player.supports_dop_output.assert_called_with(176400)
+
+
+@pytest.mark.asyncio
+async def test_flow_format_ignores_dop_with_dsp() -> None:
+    """DSP filters the stream, so a player with DSP on gets decoded PCM."""
+    audio = _make_streams_audio(dop=True)
+    audio.mass.config.get_player_dsp_config = MagicMock(  # type: ignore[method-assign]
+        return_value=MagicMock(enabled=True)
+    )
+    fmt = await audio.select_flow_pcm_format(
+        _make_player(), start_streamdetails=_dsd_streamdetails()
+    )
+    assert fmt.sample_rate == 352800
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("output_channels", ["mono", "left", "right"])
+async def test_flow_format_ignores_dop_with_channel_mapping(output_channels: str) -> None:
+    """A non-stereo channel mapping mixes the channels, so DoP is not used."""
+    audio = _make_streams_audio(dop=True)
+    audio.mass.config.get_raw_player_config_value = MagicMock(  # type: ignore[method-assign]
+        side_effect=lambda _player_id, key, default=None: {
+            CONF_DSD_DOP: True,
+            CONF_OUTPUT_CHANNELS: output_channels,
+        }.get(key, default)
+    )
+    fmt = await audio.select_flow_pcm_format(
+        _make_player(), start_streamdetails=_dsd_streamdetails()
+    )
+    assert fmt.sample_rate == 352800
+
+
+@pytest.mark.asyncio
+async def test_flow_format_ignores_dop_with_an_overlay() -> None:
+    """An audio overlay is mixed into the flow, so DoP is not used."""
+    audio = _make_streams_audio(dop=True)
+    fmt = await audio.select_flow_pcm_format(
+        _make_player(), start_streamdetails=_dsd_streamdetails(), overlay_active=True
+    )
+    assert fmt.sample_rate == 352800
+
+
 @pytest.mark.parametrize(
     ("flow_rate", "probed_rate", "expected"),
     [
@@ -179,10 +231,10 @@ def test_dop_transition_detects_dsd_before_resolving() -> None:
             )
         },
     )
-    audio.mass.player_queues.get_next_item = MagicMock(return_value=dsd_item)
-    assert audio._dop_transition("queue", pcm_item)
-    audio.mass.player_queues.get_next_item = MagicMock(return_value=None)
-    assert not audio._dop_transition("queue", pcm_item)
+    with patch.object(audio.mass.player_queues, "get_next_item", return_value=dsd_item):
+        assert audio._dop_transition("queue", pcm_item)
+    with patch.object(audio.mass.player_queues, "get_next_item", return_value=None):
+        assert not audio._dop_transition("queue", pcm_item)
 
 
 def _queue_item_audio(
@@ -195,6 +247,10 @@ def _queue_item_audio(
     audio = StreamsAudio(MagicMock())
     players = {queue_player.player_id: queue_player, **(protocol_players or {})}
     audio.mass.players.get_player = MagicMock(side_effect=players.get)  # type: ignore[method-assign]
+    audio.mass.player_queues.get = MagicMock(return_value=None)  # type: ignore[method-assign]
+    audio.mass.config.get_player_dsp_config = MagicMock(  # type: ignore[method-assign]
+        return_value=MagicMock(enabled=False)
+    )
     audio.mass.config.get_raw_player_config_value = MagicMock(  # type: ignore[method-assign]
         side_effect=lambda player_id, key, default=None: (
             player_id in dop_player_ids if key == CONF_DSD_DOP else default
@@ -308,7 +364,8 @@ async def test_dop_stream_releases_a_warmed_buffer() -> None:
     item = _dsd_queue_item(streamdetails)
 
     async def _no_audio(*_args: object, **_kwargs: object) -> AsyncGenerator[bytes]:
-        for chunk in ():
+        chunks: tuple[bytes, ...] = ()
+        for chunk in chunks:
             yield chunk
 
     with patch("music_assistant.controllers.streams.audio.get_dop_stream", _no_audio):
@@ -317,3 +374,24 @@ async def test_dop_stream_releases_a_warmed_buffer() -> None:
 
     warmed.clear.assert_awaited_once()
     assert streamdetails.buffer is None
+
+
+@pytest.mark.asyncio
+async def test_dop_stream_is_tracked_while_it_runs() -> None:
+    """A queue counts as streaming DoP exactly while one of its DoP items streams."""
+    audio = StreamsAudio(MagicMock())
+    item = _dsd_queue_item()
+    item.streamdetails.buffer = None
+    item.streamdetails.duration = 300
+    streaming: list[bool] = []
+
+    async def _capture(*_args: object, **_kwargs: object) -> AsyncGenerator[bytes]:
+        streaming.append(audio.is_streaming_dop(item.queue_id))
+        yield b"\x00" * 8
+
+    with patch("music_assistant.controllers.streams.audio.get_dop_stream", _capture):
+        async for _ in audio._get_dop_queue_item_stream(item, _pcm_format(176400), 0, True):
+            pass
+
+    assert streaming == [True]
+    assert not audio.is_streaming_dop(item.queue_id)
